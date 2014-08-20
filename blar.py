@@ -37,10 +37,6 @@ import operator
 import time
 import argparse
 
-# Global constants
-
-codon_width = 4
-
 
 # Is odd...roughly twice as fast as mod test
 
@@ -73,37 +69,30 @@ def normalize(V):
 
 def feature_hash_string(s, window, dim):
 
-    # Generate window-char Markov chains & create feature hashes
+    start = time.clock()
 
-    chains = [xxhash.xxh32(s[i:i + window]) % dim for i in
-              xrange(len(s) - (window - 0x1))]
+    # Generate window-char Markov chains & create feature hash vector
 
-    # Initialize counter array
+    v = {}
+    for x in range(0, dim):
+        v[x] = 0
+    length = len(s)
+    max_num = 2.0 ** 64
+    for x in range(0, length - window):
+        key = xxhash.xxh64(s[x:x + window]) % dim
+        v[key] += 0x1
 
-    counters = numpy.zeros(dim)
-
-    # Count instances of feature hashes
-
-    for i in range(len(chains)):
-
-        # Use a second binary hash function to reduce collisions per Langford, et al.
-
-        if is_odd(chains[i]):
-            counters[chains[i]] -= 0x1
-        else:
-            counters[chains[i]] += 0x1
-
-    # Return feature hash count vector
-
-    return counters
+    return numpy.asarray(v.values())
 
 
 # Use random projection for LSH and output a UTF char for the hash
 
 def locality_hash_vector(v, width):
+
+    start = time.clock()
     hash = numpy.zeros(width, dtype=int)
     for x in range(0, width):
-        projection = numpy.dot(projection_vectors[x], v)
+        projection = numpy.dot(PROJECTION_VECTORS[x], v)
         if projection < 0:
             hash[x] = 0
         else:
@@ -163,8 +152,13 @@ parser.add_argument(
     help='Set the width of codons in nucleotides',
     )
 
-parser.add_argument('-C', action='store_true', dest='C', default=False,
-                    help='Display charts; default off')
+parser.add_argument(
+    '-C',
+    action='store_true',
+    dest='C',
+    default=False,
+    help='Display charts; default off'
+    )
 
 parser.add_argument(
     '-m',
@@ -175,10 +169,14 @@ parser.add_argument(
     help='Set the window size for moving average display',
     )
 
-parser.add_argument('-g', action='store', dest='granularity',
-                    default=2,
-                    help='Sets the granularity factor for auto-tuning, from 1-N'
-                    )
+parser.add_argument(
+    '-g',
+    action='store',
+    dest='granularity',
+    default=2, 
+    type=int,
+    help='Sets the granularity factor for auto-tuning, from 1-N'
+    )
 
 parser.add_argument(
     '-t',
@@ -187,11 +185,24 @@ parser.add_argument(
     default=0.,
     type=float,
     help='Sets the threshold for printing interesting items in std. deviations, default 2.0'
-        ,
     )
 
-parser.add_argument('-i', action='store', dest='f_name', required=True,
-                    help='Input file name')
+parser.add_argument(
+    '-p',
+    action='store_false',
+    dest='hard',
+    required=False,
+    default=True,
+    help='Do not use hard projection vectors',
+    )
+
+parser.add_argument(
+    '-i',
+    action='store',
+    dest='f_name',
+    required=True,
+    help='Input file name'
+    )
 
 args = vars(parser.parse_args())
 
@@ -238,7 +249,7 @@ if args['a_width'] > 0:
     alphabet_width = args['a_width']
 else:
     print 'Autotuning alphabet width'
-    alphabet_width = int(math.ceil(math.sqrt(math.log(file_length))))
+    alphabet_width = int(math.ceil(math.sqrt(math.log(file_length, 2))))
 
 if args['i_threshold'] != 0.:
     interestingness_threshold = args['i_threshold']
@@ -252,11 +263,25 @@ print 'Granularity: ', granularity
 
 # Generate random unit normal comparison vectors for random projection
 
-projection_vectors = []
-for vector in range(0, alphabet_width):
-    numpy.random.seed(vector)
-    projection_vectors.append(normalize(numpy.random.randn(0x1,
-                              feature_width)))
+PROJECTION_VECTORS = []
+if args['hard']:
+    for vector in range(0, alphabet_width):
+        numpy.random.seed(vector)
+        v = numpy.random.randint(2, size=feature_width)
+        counter = 0
+        for e in v:
+            if e == 0:
+                v[counter] = -0x1
+                counter += 0x1
+            else:
+                v[counter] = 0x1
+                counter += 0x1
+        PROJECTION_VECTORS.append(v)
+else:
+    for vector in range(0, alphabet_width):
+        numpy.random.seed(vector)
+        PROJECTION_VECTORS.append(normalize(numpy.random.randn(0x1,
+                                  feature_width)))
 
 # CREATE GENOME
 #
